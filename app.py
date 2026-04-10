@@ -12,8 +12,12 @@ from dotenv import load_dotenv  # .env 파일 로드를 위한 library 임포트
 # 페이지 기본 설정 (제목, 레이아웃, 아이콘)
 st.set_page_config(page_title="Naver Real-time Market Intelligence", layout="wide", page_icon="🚀")
 
-# .env 파일에서 환경 변수를 로드 (로컬 개발용)
-load_dotenv()
+# 현재 파일 기준으로 .env 경로를 명시적으로 지정하여 어디서 실행해도 올바르게 로드
+_ENV_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
+if not os.path.exists(_ENV_PATH):
+    # src/dashboard.py 실행 시에는 상위 폴더의 .env를 참조
+    _ENV_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".env")
+load_dotenv(dotenv_path=_ENV_PATH)
 
 # 네이버 API 자격 증명 로드: 배포 환경(Streamlit Secrets) 우선, 없으면 로컬 .env 환경변수 사용
 try:
@@ -46,7 +50,7 @@ def get_word_frequency(series, top_n=30):
 
 # 네이버 데이터랩 트렌드 API를 호출하여 검색량 추이를 가져오는 함수
 @st.cache_data(ttl=600, show_spinner=False)
-def fetch_datalab_trend_cached(keywords, start_date, end_date):
+def fetch_datalab_trend_cached(keywords: tuple, start_date, end_date):  # 캐시 키 안정성을 위해 tuple 사용
     if not keywords: return pd.DataFrame()  # 키워드가 없으면 즉시 종료
     url = "https://openapi.naver.com/v1/datalab/search"  # 데이터랩 API 엔드포인트
     keyword_groups = [{"groupName": kw, "keywords": [kw]} for kw in keywords]  # 키워드 그룹 설정
@@ -56,12 +60,12 @@ def fetch_datalab_trend_cached(keywords, start_date, end_date):
         "timeUnit": "date",  # 시간 단위 설정
         "keywordGroups": keyword_groups  # 키워드 그룹 전달
     }
-    
+
     request = urllib.request.Request(url)  # HTTP 요청 객체 생성
     request.add_header("X-Naver-Client-Id", CLIENT_ID)  # API ID 헤더 추가
     request.add_header("X-Naver-Client-Secret", CLIENT_SECRET)  # API Secret 헤더 추가
     request.add_header("Content-Type", "application/json")  # 콘텐츠 타입 헤더 추가
-    
+
     try:
         # API 요청 실행 및 응답 수신
         response = urllib.request.urlopen(request, data=json.dumps(body).encode("utf-8"))
@@ -73,8 +77,9 @@ def fetch_datalab_trend_cached(keywords, start_date, end_date):
                 for d in group['data']:  # 기간별 데이터 순회
                     results.append({"date": d['period'], "keyword": title, "ratio": d['ratio']})
             return pd.DataFrame(results)  # 데이터프레임으로 변환하여 반환
-    except:
-        return pd.DataFrame()  # 에러 발생 시 빈 데이터프레임 반환
+    except Exception as e:
+        st.sidebar.error(f"[트렌드 API 오류] {e}")  # 오류 원인을 사이드바에 출력
+        return pd.DataFrame()
     return pd.DataFrame()
 
 # 네이버 검색 API(블로그, 뉴스 등) 단일 호출 함수
@@ -85,11 +90,11 @@ def fetch_search_results_single(api_type, query):
     endpoint = api_map.get(api_type)  # 호출할 엔드포인트 선택
     encText = urllib.parse.quote(query)  # 검색어 URL 인코딩
     url = f"https://openapi.naver.com/v1/search/{endpoint}.json?query={encText}&display=100"  # API URL 생성
-    
+
     request = urllib.request.Request(url)  # HTTP 요청 객체 생성
     request.add_header("X-Naver-Client-Id", CLIENT_ID)  # API ID 헤더 추가
     request.add_header("X-Naver-Client-Secret", CLIENT_SECRET)  # API Secret 헤더 추가
-    
+
     try:
         response = urllib.request.urlopen(request)  # API 호출 실행
         if response.getcode() == 200:  # 성공 시
@@ -97,8 +102,9 @@ def fetch_search_results_single(api_type, query):
             df = pd.DataFrame(data['items'])  # 검색 결과 아이템들을 데이터프레임화
             df['search_keyword'] = query  # 검색어 정보 컬럼 추가
             return df  # 결과 반환
-    except:
-        return pd.DataFrame()  # 에러 시 빈 데이터프레임 반환
+    except Exception as e:
+        st.sidebar.warning(f"[{api_type}/{query} 오류] {e}")  # 오류 원인을 사이드바에 출력
+        return pd.DataFrame()
     return pd.DataFrame()
 
 # 여러 키워드에 대해 검색 API를 순차 호출하여 합쳐주는 함수
@@ -158,7 +164,8 @@ if len(date_range) == 2 and selected_keywords:
     # 실시간 수집 상태 표시기(Status 바) 생성
     with st.status("🔍 네이버 API 데이터를 실시간으로 가져오는 중...", expanded=False) as status:
         st.write("📈 검색어 트렌드 분석 중...")
-        df_trend = fetch_datalab_trend_cached(selected_keywords, date_range[0], date_range[1])
+        # 리스트를 tuple로 변환하여 캐시 키가 안정적으로 동작하도록 함
+        df_trend = fetch_datalab_trend_cached(tuple(selected_keywords), date_range[0], date_range[1])
         
         st.write("📱 블로그/포스트 여론 수집 중...")
         df_blog = fetch_all_search_results("blog", selected_keywords)
