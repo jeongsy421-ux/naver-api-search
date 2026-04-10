@@ -15,10 +15,15 @@ st.set_page_config(page_title="Naver Real-time Market Intelligence", layout="wid
 # .env 파일에서 환경 변수를 로드 (로컬 개발용)
 load_dotenv()
 
-# 네이버 API 호출을 위한 Client ID 가져오기 (Streamlit Secrets 우선, 없으면 환경변수에서 로드)
-CLIENT_ID = st.secrets.get("NAVER_CLIENT_ID") or os.getenv("NAVER_CLIENT_ID")
-# 네이버 API 호출을 위한 Client Secret 가져오기 (Streamlit Secrets 우선, 없으면 환경변수에서 로드)
-CLIENT_SECRET = st.secrets.get("NAVER_CLIENT_SECRET") or os.getenv("NAVER_CLIENT_SECRET")
+# 네이버 API 자격 증명 로드: 배포 환경(Streamlit Secrets) 우선, 없으면 로컬 .env 환경변수 사용
+try:
+    # Streamlit Cloud 배포 환경에서는 secrets.toml에서 로드
+    CLIENT_ID = st.secrets.get("NAVER_CLIENT_ID") or os.getenv("NAVER_CLIENT_ID")
+    CLIENT_SECRET = st.secrets.get("NAVER_CLIENT_SECRET") or os.getenv("NAVER_CLIENT_SECRET")
+except Exception:
+    # 로컬 개발 환경 등 secrets.toml이 없는 경우 .env 파일에서 로드
+    CLIENT_ID = os.getenv("NAVER_CLIENT_ID")
+    CLIENT_SECRET = os.getenv("NAVER_CLIENT_SECRET")
 
 # --- 유틸리티 및 캐싱 함수 영역 ---
 
@@ -108,30 +113,25 @@ def fetch_all_search_results(api_type, keywords):
 
 # --- 사이드바 UI 및 환경 설정 영역 ---
 
-st.sidebar.title("🔍 검색 및 실시간 수집")  # 사이드바 제목
+st.sidebar.title("🔍 실시간 마켓 분석 설정")  # 사이드바 제목
 
-# 세션 상태에 검색 히스토리 변수 초기화
-if 'search_history' not in st.session_state:
-    st.session_state.search_history = ["선풍기", "핫팩"]
+# 통합 검색 인터페이스: 입력과 선택을 하나의 칸으로 합침
+if 'active_keywords_str' not in st.session_state:
+    st.session_state.active_keywords_str = "선풍기, 핫팩"
 
-# 1. 자유 키워드 검색창 (새로운 분석 단어 입력)
-search_input = st.sidebar.text_input(
-    "💡 새로운 분석 키워드 입력", 
-    placeholder="예: 헬스장, 캠핑용품, 전기자전거 등",
-    help="Enter를 누르면 즉시 전체 데이터 수집이 시작됩니다."
+# 하나의 통합 검색란에서 모든 키워드를 관리 (입력 즉시 수집 및 분석 대상 반영)
+kw_input_raw = st.sidebar.text_input(
+    "📊 분석 키워드 입력", 
+    value=st.session_state.active_keywords_str,
+    placeholder="여러 키워드는 공백이나 쉼표(,)로 구분하여 입력하세요",
+    help="여기에 입력한 단어들이 즉시 분석 대상이 됩니다. '선풍기 핫팩 캠핑' 처럼 나열해 보세요."
 )
-# 새로운 단어가 입력되면 히스토리에 추가
-if search_input and search_input not in st.session_state.search_history:
-    st.session_state.search_history.append(search_input)
-    st.sidebar.success(f"'{search_input}' 키워드가 분석 대상으로 추가되었습니다!")
 
-# 2. 분석 대상 설정 (멀티셀렉트)
-selected_keywords = st.sidebar.multiselect(
-    "📊 비교 분석 대상 설정",
-    options=st.session_state.search_history,  # 히스토리 목록 제공
-    default=st.session_state.search_history,  # 기본적으로 모두 선택
-    help="선택된 키워드들에 대한 데이터를 실시간으로 조회합니다."
-)
+# 입력된 텍스트를 공백 또는 쉼표 기준으로 분할하여 실제 분석 키워드 리스트 생성
+selected_keywords = [k.strip() for k in re.split(r'[,\s]+', kw_input_raw) if k.strip()]
+
+# 세션 상태에 현재 입력값 동기화 (상태 유지용)
+st.session_state.active_keywords_str = kw_input_raw
 
 # 3. 날짜 범위 선택기
 date_range = st.sidebar.date_input(
